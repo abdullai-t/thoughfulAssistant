@@ -8,6 +8,11 @@ export class TrayManager {
     onToggleRecording: () => void;
     onSettings: () => void;
     onQuit: () => void;
+    accelerators?: {
+      toggleOverlay?: string | null;
+      toggleRecording?: string | null;
+      quit?: string | null;
+    };
   }): Tray {
     // Real monochrome bitmap: an empty NativeImage creates an invisible macOS tray.
     const pixels = Buffer.alloc(18 * 18 * 4);
@@ -25,28 +30,23 @@ export class TrayManager {
     this.tray = new Tray(icon);
     this.tray.setToolTip('Interview Overlay');
 
+    // macOS menu items stay unlabeled. Windows shows Ctrl/Alt accelerators.
+    const item = (label: string, click: () => void, accelerator?: string | null) => (
+      process.platform === 'darwin' || !accelerator ? { label, click } : { label, click, accelerator }
+    );
     const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Toggle Overlay',
-        click: callbacks.onToggleOverlay
-      },
-      {
-        label: 'Toggle Recording',
-        click: callbacks.onToggleRecording
-      },
+      item('Toggle Overlay', callbacks.onToggleOverlay, callbacks.accelerators?.toggleOverlay),
+      item('Toggle Recording', callbacks.onToggleRecording, callbacks.accelerators?.toggleRecording),
       { type: 'separator' },
       {
         label: 'Settings',
         click: callbacks.onSettings
       },
       { type: 'separator' },
-      {
-        label: 'Quit',
-        click: () => {
-          callbacks.onQuit();
-          app.quit();
-        }
-      }
+      item('Quit', () => {
+        callbacks.onQuit();
+        app.quit();
+      }, callbacks.accelerators?.quit)
     ]);
 
     this.tray.setContextMenu(contextMenu);

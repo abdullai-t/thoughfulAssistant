@@ -16,7 +16,7 @@ function load(file, electron, platform = 'darwin') {
   });
   return module.exports;
 }
-const { defaultHotkeys, migrateControls, acceleratorFor, shortcutLabel } = load('src/shared/controls.ts');
+const { defaultHotkeys, migrateControls, acceleratorFor, shortcutLabel, isReservedWindowsBinding } = load('src/shared/controls.ts');
 const mac = defaultHotkeys('darwin');
 assert.equal(acceleratorFor(mac.toggleOverlay.vkCodes, 'darwin'), 'Command+\\');
 assert.equal(acceleratorFor(mac.chat.vkCodes, 'darwin'), 'Command+Enter');
@@ -32,6 +32,47 @@ assert.equal(migrated.cancelStream.label, '⌘⇧X');
 assert.deepEqual(migrateControls(migrated, 'darwin', 1), migrated);
 assert.equal(migrateControls(old, 'win32', 0).askAi.label, 'Ctrl+Shift+A');
 assert.equal(new Set(Object.values(mac).map(b => acceleratorFor(b.vkCodes, 'darwin'))).size, Object.keys(mac).length);
+const macLabels = {
+  toggleOverlay: '⌘\\', chat: '⌘↵', askAi: '⌘⇧↵', captureScreen: '⌘⇧S', toggleRecording: '⌘⇧R',
+  toggleInteract: '⌘⇧I', cancelStream: '⌘⇧X', resetAll: '⌘⇧N', scrollUp: '⌘⇧↑', scrollDown: '⌘⇧↓',
+  quitApp: '⌘⌥Q', moveWindowUp: '⌘⌥↑', moveWindowDown: '⌘⌥↓', moveWindowLeft: '⌘⌥←',
+  moveWindowRight: '⌘⌥→', hideApp: '⌘⇧H', toggleTypingMode: '⌘⇧W'
+};
+for (const [name, label] of Object.entries(macLabels)) assert.equal(mac[name].label, label, name);
+const windowsDefaults = defaultHotkeys('win32');
+const winLabels = {
+  toggleOverlay: 'Ctrl+Shift+H', chat: 'Ctrl+Enter', askAi: 'Ctrl+Shift+A', captureScreen: 'Ctrl+Shift+S',
+  toggleRecording: 'Ctrl+Shift+R', toggleInteract: 'Ctrl+Shift+I', cancelStream: 'Ctrl+Shift+X',
+  resetAll: 'Ctrl+Shift+N', scrollUp: 'Ctrl+Shift+Up', scrollDown: 'Ctrl+Shift+Down', quitApp: 'Ctrl+Shift+Q',
+  moveWindowUp: 'Ctrl+Alt+Shift+Up', moveWindowDown: 'Ctrl+Alt+Shift+Down', moveWindowLeft: 'Ctrl+Alt+Shift+Left',
+  moveWindowRight: 'Ctrl+Alt+Shift+Right', hideApp: 'Ctrl+H', toggleTypingMode: 'Ctrl+Shift+W'
+};
+for (const [name, label] of Object.entries(winLabels)) {
+  assert.equal(windowsDefaults[name].label, label, name);
+  assert.equal(windowsDefaults[name].label.includes('⌘') || windowsDefaults[name].label.includes('⌥'), false);
+  assert.equal(isReservedWindowsBinding(windowsDefaults[name].vkCodes), false, name);
+}
+assert.equal(isReservedWindowsBinding([0x1B]), true);
+assert.equal(isReservedWindowsBinding([0x11, 0x12, 0x26]), true);
+assert.equal(isReservedWindowsBinding([0x12, 0x73]), true);
+assert.equal(isReservedWindowsBinding([0x5B, 0x45]), true);
+const legacyWin = defaultHotkeys('win32');
+legacyWin.cancelStream = { vkCodes: [0x1B], label: 'Escape' };
+legacyWin.moveWindowLeft = { vkCodes: [0x11, 0x12, 0x25], label: 'Ctrl+Alt+Left' };
+legacyWin.askAi = { vkCodes: [0x11, 0x10, 0x42], label: 'custom' };
+const upgraded = migrateControls(legacyWin, 'win32', 1);
+assert.equal(upgraded.cancelStream.label, 'Ctrl+Shift+X');
+assert.equal(upgraded.moveWindowLeft.label, 'Ctrl+Alt+Shift+Left');
+assert.equal(upgraded.askAi.label, 'Ctrl+Shift+B');
+assert.equal(migrateControls(legacyWin, 'win32', 2).cancelStream.label, 'Escape');
+const legacyOnMac = migrateControls({
+  toggleOverlay: { vkCodes: [0x11, 0x10, 0x48], label: 'Ctrl+Shift+H' },
+  cancelStream: { vkCodes: [0x1B], label: 'Escape' },
+  moveWindowUp: { vkCodes: [0x11, 0x12, 0x26], label: 'Ctrl+Alt+Up' }
+}, 'darwin', 0);
+assert.equal(legacyOnMac.toggleOverlay.label, '⌘\\');
+assert.equal(legacyOnMac.cancelStream.label, '⌘⇧X');
+assert.equal(legacyOnMac.moveWindowUp.label, '⌘⌥↑');
 console.log('PASS: Mac mappings, legacy migration, custom bindings, idempotence, Windows defaults, no collisions');
 
 class MockWindow extends EventEmitter {
@@ -103,6 +144,36 @@ let fired; hotkeys.on('hotkey', action => { fired = action; });
 registrations.get('Command+Enter')(); assert.equal(fired, 'chat');
 hotkeys.stop(); assert.equal(registrations.size, 0);
 console.log('PASS: accelerator registration, callback dispatch, conflicts surfaced, no global Escape, cleanup');
+
+const winRegistrations = new Map();
+const { HotkeyManager: WindowsHotkeyManager } = load('src/main/hotkey-manager.ts', {
+  globalShortcut: {
+    register: (key, callback) => { winRegistrations.set(key, callback); return true; },
+    unregister: key => winRegistrations.delete(key)
+  }
+}, 'win32');
+const windowsHotkeys = new WindowsHotkeyManager();
+windowsHotkeys.registerHotkeys(defaultHotkeys('win32'));
+windowsHotkeys.start();
+assert.ok(winRegistrations.has('Control+Shift+H'));
+assert.ok(winRegistrations.has('Control+Enter'));
+assert.ok(winRegistrations.has('Control+Shift+X'));
+assert.ok(winRegistrations.has('Control+Alt+Shift+Up'));
+assert.equal(winRegistrations.has('Escape'), false);
+assert.equal(winRegistrations.has('Control+Alt+Up'), false);
+assert.equal([...winRegistrations.keys()].some(key => key.includes('Command') || key.includes('Option')), false);
+windowsHotkeys.stop();
+const reserved = defaultHotkeys('win32');
+reserved.moveWindowUp = { vkCodes: [0x11, 0x12, 0x26], label: 'Ctrl+Alt+Up' };
+reserved.cancelStream = { vkCodes: [0x1B], label: 'Escape' };
+windowsHotkeys.registerHotkeys(reserved);
+windowsHotkeys.start();
+assert.ok(windowsHotkeys.getFailedShortcuts().includes('moveWindowUp'));
+assert.ok(windowsHotkeys.getFailedShortcuts().includes('cancelStream'));
+assert.equal(winRegistrations.has('Control+Alt+Up'), false);
+assert.equal(winRegistrations.has('Escape'), false);
+windowsHotkeys.stop();
+console.log('PASS: Windows Ctrl/Alt accelerators, reserved chords refused, Escape stays local');
 
 (async () => {
   manager.stealthShow();

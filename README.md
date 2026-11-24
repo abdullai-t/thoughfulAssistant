@@ -58,6 +58,27 @@ The installer is:
 
 - `release/InterviewOverlay-<version>-win-x64.exe`
 
+Windows shortcuts use Ctrl and Alt. They are not the macOS symbols. Bare Escape stays inside the chat field and Settings (it is not a global hotkey). Ctrl+Alt+Arrow is not used, because Windows and many graphics drivers reserve it for rotating the display.
+
+| Action | Windows |
+| --- | --- |
+| Show / hide overlay | Ctrl+Shift+H |
+| Open chat / send question | Ctrl+Enter |
+| Get answer from screen | Ctrl+Shift+A |
+| Capture screen | Ctrl+Shift+S |
+| Toggle recording | Ctrl+Shift+R |
+| Toggle click-through | Ctrl+Shift+I |
+| Stop answer | Ctrl+Shift+X |
+| New conversation | Ctrl+Shift+N |
+| Scroll up / down | Ctrl+Shift+Up / Down |
+| Quit | Ctrl+Shift+Q |
+| Move overlay | Ctrl+Alt+Shift+Arrow |
+| Show / hide (alternate) | Ctrl+H |
+| Toggle typing focus | Ctrl+Shift+W |
+| Exit chat / stop answer while typing; close Settings | Escape (local only) |
+
+The tray menu shows the overlay, recording, and quit accelerators. macOS bindings are unchanged; see [docs/mac-controls.md](docs/mac-controls.md).
+
 It is per-user by default (the install directory can be changed) and creates Desktop and Start menu shortcuts. The app icon is `assets/icons/app-icon.ico`.
 
 `npm run build:win-native` rebuilds only the addon. `npm run package` is still `electron-builder --win` alone: it does not compile the bundle or the addon. Use `npm run build:win`.
