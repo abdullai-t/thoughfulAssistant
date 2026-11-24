@@ -58,6 +58,8 @@ The installer is:
 
 - `release/InterviewOverlay-<version>-win-x64.exe`
 
+Drag the overlay by its header, status bar, privacy row, or the Settings title. Buttons, fields, and the scrolling answer stay put so you can click and select text. Transparent areas outside the panel still pass clicks through. The window follows the pointer from the main process, because a CSS drag region does not move a transparent frameless window on Windows.
+
 Windows shortcuts use Ctrl and Alt. They are not the macOS symbols. Bare Escape stays inside the chat field and Settings (it is not a global hotkey). Ctrl+Alt+Arrow is not used, because Windows and many graphics drivers reserve it for rotating the display.
 
 | Action | Windows |

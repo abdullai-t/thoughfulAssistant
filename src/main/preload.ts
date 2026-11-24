@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { isWindowDragTarget } from '../shared/window-drag';
 
 const electronAPI = {
   getAudioStatus: () => ipcRenderer.invoke('audio:status'),
@@ -163,6 +164,22 @@ function setIgnore(ignore: boolean) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !event.isPrimary || !isWindowDragTarget(event.target)) return;
+    const captureTarget = event.target instanceof Element ? event.target : document.documentElement;
+    captureTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    ipcRenderer.send('window:drag-start');
+    const end = () => {
+      ipcRenderer.send('window:drag-end');
+      isCurrentlyIgnoring = null;
+      document.removeEventListener('pointerup', end, true);
+      document.removeEventListener('pointercancel', end, true);
+    };
+    document.addEventListener('pointerup', end, true);
+    document.addEventListener('pointercancel', end, true);
+  });
+
   document.addEventListener('mousemove', (event) => {
     const target = event.target as Element;
     // If target is html, body, or #root — we're over transparent area

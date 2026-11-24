@@ -21,6 +21,9 @@ export class WindowManager extends EventEmitter {
   private protectionState: WindowState['contentProtection'] = 'unavailable';
   private isFullPassthrough = false;
   private visibilityRevision = 0;
+  private dragging = false;
+  private dragOrigin: { cursorX: number; cursorY: number; winX: number; winY: number } | null = null;
+  private dragTimer: ReturnType<typeof setInterval> | null = null;
 
   createOverlayWindow(config: {
     width: number;
@@ -83,6 +86,7 @@ export class WindowManager extends EventEmitter {
     });
 
     this.mainWindow.on('closed', () => {
+      this.endDrag();
       this.mainWindow = null;
     });
 
@@ -158,7 +162,7 @@ export class WindowManager extends EventEmitter {
    * click-through based on whether the mouse is over a UI element.
    */
   handleSmartHitTest(ignore: boolean, options?: { forward: boolean }): void {
-    if (!this.mainWindow || this.isFullPassthrough) return;
+    if (!this.mainWindow || this.isFullPassthrough || this.dragging) return;
 
     if (ignore) {
       this.mainWindow.setIgnoreMouseEvents(true, options || { forward: true });
@@ -242,6 +246,39 @@ export class WindowManager extends EventEmitter {
       Math.round(Math.max(area.x, Math.min(x, area.x + area.width - bounds.width))),
       Math.round(Math.max(area.y, Math.min(y, area.y + area.height - Math.min(bounds.height, area.height))))
     );
+  }
+
+  /**
+   * Pointer drag for a transparent frameless window. CSS -webkit-app-region
+   * does not move that kind of window on Windows, so the main process tracks
+   * the screen cursor until the renderer releases the pointer.
+   */
+  beginDrag(): void {
+    if (!this.mainWindow || this.isFullPassthrough || !this.mainWindow.isVisible()) return;
+    const cursor = screen.getCursorScreenPoint();
+    const [winX, winY] = this.mainWindow.getPosition();
+    this.dragOrigin = { cursorX: cursor.x, cursorY: cursor.y, winX, winY };
+    this.dragging = true;
+    this.mainWindow.setIgnoreMouseEvents(false);
+    if (!this.dragTimer) this.dragTimer = setInterval(() => this.dragMove(), 16);
+  }
+
+  dragMove(): void {
+    if (!this.dragging || !this.dragOrigin || !this.mainWindow) return;
+    const cursor = screen.getCursorScreenPoint();
+    this.setPosition(
+      this.dragOrigin.winX + (cursor.x - this.dragOrigin.cursorX),
+      this.dragOrigin.winY + (cursor.y - this.dragOrigin.cursorY)
+    );
+  }
+
+  endDrag(): void {
+    this.dragging = false;
+    this.dragOrigin = null;
+    if (this.dragTimer) {
+      clearInterval(this.dragTimer);
+      this.dragTimer = null;
+    }
   }
 
   moveBy(dx: number, dy: number): void {

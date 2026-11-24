@@ -11,6 +11,7 @@ function load(file, electron, platform = 'darwin') {
   vm.runInNewContext(code, {
     module, exports: module.exports, __dirname: __dirname, Buffer, setTimeout,
     process: { platform, resourcesPath: '/unavailable' },
+    setInterval, clearInterval,
     console: { log() {}, warn() {}, error() {} },
     require: name => name === 'electron' ? electron : require(name)
   });
@@ -73,6 +74,15 @@ const legacyOnMac = migrateControls({
 assert.equal(legacyOnMac.toggleOverlay.label, '⌘\\');
 assert.equal(legacyOnMac.cancelStream.label, '⌘⇧X');
 assert.equal(legacyOnMac.moveWindowUp.label, '⌘⌥↑');
+const { isWindowDragTarget } = load('src/shared/window-drag.ts');
+const dragNode = (token) => ({ closest: (selector) => selector.includes(token) ? { token } : null });
+assert.equal(isWindowDragTarget(dragNode('.overlay-panel')), true);
+assert.equal(isWindowDragTarget(dragNode('.settings-topbar')), true);
+assert.equal(isWindowDragTarget(dragNode('button')), false);
+assert.equal(isWindowDragTarget(dragNode('textarea')), false);
+assert.equal(isWindowDragTarget(dragNode('.tab-content')), false);
+assert.equal(isWindowDragTarget(dragNode('.audio-panel')), false);
+assert.equal(isWindowDragTarget(null), false);
 console.log('PASS: Mac mappings, legacy migration, custom bindings, idempotence, Windows defaults, no collisions');
 
 class MockWindow extends EventEmitter {
@@ -99,8 +109,14 @@ class MockWindow extends EventEmitter {
   setSize(width, height) { Object.assign(this.bounds, { width, height }); }
 }
 const display = { workArea: { x: 0, y: 25, width: 1200, height: 775 }, workAreaSize: { width: 1200, height: 775 } };
+const cursor = { x: 0, y: 0 };
 const { WindowManager } = load('src/main/window-manager.ts', {
-  BrowserWindow: MockWindow, screen: { getPrimaryDisplay: () => display, getDisplayMatching: () => display }
+  BrowserWindow: MockWindow,
+  screen: {
+    getPrimaryDisplay: () => display,
+    getDisplayMatching: () => display,
+    getCursorScreenPoint: () => ({ x: cursor.x, y: cursor.y })
+  }
 });
 const manager = new WindowManager();
 const win = manager.createOverlayWindow({ x: 100, y: 100, width: 500, height: 600, opacity: 0.85 });
@@ -123,6 +139,31 @@ manager.setFocusableForInput(false); assert.equal(win.focused, false);
 manager.moveBy(-10000, 10000); assert.equal(win.bounds.x, 0); assert.equal(win.bounds.y, 200);
 win.setContentProtection = () => { throw new Error('unsupported'); };
 manager.setContentProtection(true); assert.equal(manager.getState().contentProtection, 'unavailable');
+manager.stealthShow();
+manager.setFullPassthrough(true);
+cursor.x = 10; cursor.y = 10;
+manager.beginDrag();
+cursor.x = 80; cursor.y = 80;
+manager.dragMove();
+assert.equal(win.bounds.x, 0, 'click-through does not drag');
+assert.equal(win.bounds.y, 200);
+manager.endDrag();
+manager.setFullPassthrough(false);
+const [dragStartX, dragStartY] = win.getPosition();
+cursor.x = 400; cursor.y = 400;
+manager.beginDrag();
+assert.equal(win.ignoring, false);
+cursor.x = 430; cursor.y = 360;
+manager.dragMove();
+assert.equal(win.getPosition()[0], dragStartX + 30);
+assert.equal(win.getPosition()[1], dragStartY - 40);
+manager.handleSmartHitTest(true);
+assert.equal(win.ignoring, false, 'drag keeps mouse events');
+manager.endDrag();
+const frozenX = win.getPosition()[0];
+cursor.x = 900;
+manager.dragMove();
+assert.equal(win.getPosition()[0], frozenX);
 console.log('PASS: protection before show, opt-out persistence, no focus steal, hide/show, click-through, focus release, bounds, failure status');
 
 const registrations = new Map();
