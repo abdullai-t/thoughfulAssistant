@@ -158,7 +158,11 @@ const OverlayPanel: React.FC<OverlayPanelProps> = ({
 
       {(audioState.isStarting || isRecording || audioError) && <div className="audio-panel" role="status">
         {audioError ? <div className="audio-error">{audioError} <button type="button" onClick={onSettingsClick}>Audio settings</button></div>
-          : audioState.isStarting ? <span>Starting audio… Allow macOS permission prompts. Press Record again to cancel.</span>
+          : audioState.isStarting ? <span>{window.electronAPI?.platform === 'darwin'
+            ? 'Starting audio… Allow macOS permission prompts. Press Record again to cancel.'
+            : window.electronAPI?.platform === 'win32'
+              ? 'Starting audio… Allow the Windows microphone prompt if it appears. Press Record again to cancel.'
+              : 'Starting audio… Press Record again to cancel.'}</span>
           : <><span className="audio-panel-title">Live audio</span>
             {audioState.microphone && <label>Mic <meter aria-label="Microphone input level" min={0} max={1} value={audioLevels.mic} /></label>}
             {audioState.systemAudio && <label>System <meter aria-label="System audio input level" min={0} max={1} value={audioLevels.system} /></label>}

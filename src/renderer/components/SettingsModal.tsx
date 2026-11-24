@@ -480,8 +480,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, shortcut
               onChange={event => update('audio', 'autoAnswer', event.target.checked)} /> Auto-answer system audio</label>
             <p className="privacy-explanation">After about two seconds of silence, finalized system-audio speech is sent to the selected AI as transcript context. Microphone speech cancels a pending answer. This may use provider API quota.</p>
           </div>
-          <p className="privacy-explanation">Press Record or {settings.hotkeys.toggleRecording.label} to start/stop. Source/provider changes apply to the next recording.
-            On Mac, allow Microphone and Screen &amp; System Audio Recording in System Settings → Privacy &amp; Security. Capture is only active while recording is on.</p>
+          <p className="privacy-explanation">{`Press Record or ${settings.hotkeys.toggleRecording.label} to start/stop. Source/provider changes apply to the next recording. ${
+            api.platform === 'darwin'
+              ? 'On Mac, allow Microphone and Screen & System Audio Recording in System Settings → Privacy & Security. '
+              : api.platform === 'win32'
+                ? 'On Windows, allow microphone access if prompted. System audio uses WASAPI loopback. '
+                : ''
+          }Capture is only active while recording is on.`}</p>
           <div className="settings-field">
             <label className="settings-label">Provider</label>
             <select
@@ -590,8 +595,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, shortcut
           <div className="settings-field">
             <label><input type="checkbox" checked={settings.overlay.captureProtection}
               onChange={e => update('overlay', 'captureProtection', e.target.checked)} /> Request capture protection</label>
-            <p className="privacy-explanation">Best effort only. macOS ScreenCaptureKit can still capture this window.
-              Test your exact screen-sharing setup before relying on it. The app remains visible in Activity Monitor.</p>
+            <p className="privacy-explanation">{api.platform === 'darwin'
+              ? 'Best effort only. macOS ScreenCaptureKit can still capture this window. Test your exact screen-sharing setup before relying on it. The app remains visible in Activity Monitor.'
+              : api.platform === 'win32'
+                ? 'Best effort only. Windows can exclude this window from many capture APIs, but full-screen recorders can still see it. Test your exact screen-sharing setup before relying on it. The app remains visible in Task Manager.'
+                : 'Best effort only. Test your exact screen-sharing setup before relying on it.'}</p>
           </div>
           {api.platform === 'darwin' && <div className="settings-field">
             <label><input type="checkbox" checked={settings.overlay.hideDock}

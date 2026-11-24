@@ -1,0 +1,59 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/windows-build-348f
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # package-lock.json resolves @electron/node-gyp over SSH. Rewrite that to HTTPS
+      # so a runner without a GitHub SSH key can install it.
+      - name: Allow HTTPS git dependencies
+        run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Download English OCR data
+        shell: bash
+        run: curl -fsSL -o eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_python: python
+
+      - name: Build Windows installer
+        run: npm run build:win
+        env:
+          npm_config_python: python
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: InterviewOverlay-win-x64
+          path: release/InterviewOverlay-*-win-x64.exe
+          if-no-files-found: error
+          retention-days: 14
