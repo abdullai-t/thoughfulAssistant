@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { globalShortcut } from 'electron';
 import path from 'path';
 import { HotkeyConfig } from '../services/config/config-schema';
-import { acceleratorFor } from '../shared/controls';
+import { acceleratorFor, isReservedWindowsBinding } from '../shared/controls';
 
 let nativeAddon: any;
 try {
@@ -147,9 +147,15 @@ export class HotkeyManager extends EventEmitter {
     // Separate bindings: modifier combos → RegisterHotKey, standalone keys → Raw Input
     const globalHotkeys: { id: number; modifiers: number; vk: number; name: string }[] = [];
     this.rawOnlyBindings = [];
+    this.failedShortcuts = [];
 
     for (let i = 0; i < this.bindings.length; i++) {
       const binding = this.bindings[i];
+      if (process.platform === 'win32' && isReservedWindowsBinding(binding.vkCodes)) {
+        this.failedShortcuts.push(binding.name);
+        console.warn(`[hotkey] Skipping reserved Windows shortcut for ${binding.name}`);
+        continue;
+      }
       const parsed = this.parseModifiers(binding.vkCodes);
 
       if (parsed) {
@@ -179,11 +185,11 @@ export class HotkeyManager extends EventEmitter {
         console.log(`[hotkey] Registered ${globalHotkeys.length} global hotkeys (consumed), ${this.rawOnlyBindings.length} raw-only bindings`);
       } catch (e: any) {
         console.error('[hotkey] Failed to register global hotkeys:', e.message);
-        // Fall back to Raw Input for all bindings
-        this.rawOnlyBindings = [...this.bindings];
+        // Fall back to Raw Input. Reserved Windows chords stay unregistered.
+        this.rawOnlyBindings = this.bindings.filter(binding => !isReservedWindowsBinding(binding.vkCodes));
       }
     } else {
-      this.rawOnlyBindings = [...this.bindings];
+      this.rawOnlyBindings = this.bindings.filter(binding => !isReservedWindowsBinding(binding.vkCodes));
     }
   }
 
@@ -227,8 +233,13 @@ export class HotkeyManager extends EventEmitter {
         continue;
       }
 
-      // Never swallow bare Escape across every app on macOS. It is handled locally.
-      if (process.platform === 'darwin' && accelerator === 'Escape') continue;
+      if (process.platform === 'win32' && isReservedWindowsBinding(binding.vkCodes)) {
+        this.failedShortcuts.push(binding.name);
+        console.warn(`[hotkey] Skipping reserved Windows shortcut for ${binding.name}`);
+        continue;
+      }
+      // Bare Escape is handled in the chat field and Settings. Never register it globally.
+      if (accelerator === 'Escape') continue;
       let registered = false;
       try {
         registered = globalShortcut.register(accelerator, () => {

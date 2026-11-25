@@ -158,6 +158,9 @@ export function registerIpcHandlers(
     windowManager.handleSmartHitTest(ignore, options);
   });
 
+  ipcMain.on('window:drag-start', () => windowManager.beginDrag());
+  ipcMain.on('window:drag-end', () => windowManager.endDrag());
+
   ipcMain.handle('window:opacity', (_event, opacity: number) => {
     windowManager.setOpacity(opacity);
     return true;

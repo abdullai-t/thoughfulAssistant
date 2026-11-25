@@ -53,12 +53,16 @@ export function defaultHotkeys(platform: string): Record<string, ShortcutBinding
     askAi: mac ? [0x11, 0x10, 0x0D] : [0x11, 0x10, 0x41],
     captureScreen: [0x11, 0x10, 0x53], toggleRecording: [0x11, 0x10, 0x52],
     toggleInteract: [0x11, 0x10, 0x49],
-    cancelStream: mac ? [0x11, 0x10, 0x58] : [0x1B],
+    // Windows uses Ctrl+Shift+X. Bare Escape stays local (chat field and Settings).
+    cancelStream: [0x11, 0x10, 0x58],
     resetAll: [0x11, 0x10, 0x4E], scrollUp: [0x11, 0x10, 0x26],
     scrollDown: [0x11, 0x10, 0x28],
     quitApp: mac ? [0x11, 0x12, 0x51] : [0x11, 0x10, 0x51],
-    moveWindowUp: [0x11, 0x12, 0x26], moveWindowDown: [0x11, 0x12, 0x28],
-    moveWindowLeft: [0x11, 0x12, 0x25], moveWindowRight: [0x11, 0x12, 0x27],
+    // Ctrl+Alt+Arrow rotates the display on Windows. Add Shift on that platform only.
+    moveWindowUp: mac ? [0x11, 0x12, 0x26] : [0x11, 0x12, 0x10, 0x26],
+    moveWindowDown: mac ? [0x11, 0x12, 0x28] : [0x11, 0x12, 0x10, 0x28],
+    moveWindowLeft: mac ? [0x11, 0x12, 0x25] : [0x11, 0x12, 0x10, 0x25],
+    moveWindowRight: mac ? [0x11, 0x12, 0x27] : [0x11, 0x12, 0x10, 0x27],
     hideApp: mac ? [0x11, 0x10, 0x48] : [0x11, 0x48],
     toggleTypingMode: [0x11, 0x10, 0x57]
   };
@@ -67,10 +71,61 @@ export function defaultHotkeys(platform: string): Record<string, ShortcutBinding
   }]));
 }
 
+/** Windows chords the OS or graphics drivers already own. */
+export function isReservedWindowsBinding(codes: number[]): boolean {
+  let ctrl = false;
+  let alt = false;
+  let shift = false;
+  let win = false;
+  const keys: number[] = [];
+  for (const code of codes) {
+    if ([0x11, 0xA2, 0xA3].includes(code)) ctrl = true;
+    else if ([0x12, 0xA4, 0xA5].includes(code)) alt = true;
+    else if ([0x10, 0xA0, 0xA1].includes(code)) shift = true;
+    else if (code === 0x5B || code === 0x5C) win = true;
+    else keys.push(code);
+  }
+  if (win) return true;
+  if (keys.length !== 1) return false;
+  const key = keys[0];
+  if (key === 0x1B && !ctrl && !alt && !shift) return true;
+  if (alt && key === 0x73) return true;
+  if (alt && !ctrl && (key === 0x09 || key === 0x1B)) return true;
+  if (ctrl && !alt && key === 0x1B) return true;
+  if (ctrl && alt && key === 0x2E) return true;
+  if (ctrl && alt && !shift && [0x25, 0x26, 0x27, 0x28].includes(key)) return true;
+  return false;
+}
+
+/** Pre-adaptation Windows defaults. Mac migration still recognizes these chords. */
+const legacyWindowsHotkeys: Record<string, number[]> = {
+  toggleOverlay: [0x11, 0x10, 0x48],
+  chat: [0x11, 0x0D],
+  askAi: [0x11, 0x10, 0x41],
+  captureScreen: [0x11, 0x10, 0x53],
+  toggleRecording: [0x11, 0x10, 0x52],
+  toggleInteract: [0x11, 0x10, 0x49],
+  cancelStream: [0x1B],
+  resetAll: [0x11, 0x10, 0x4E],
+  scrollUp: [0x11, 0x10, 0x26],
+  scrollDown: [0x11, 0x10, 0x28],
+  quitApp: [0x11, 0x10, 0x51],
+  moveWindowUp: [0x11, 0x12, 0x26],
+  moveWindowDown: [0x11, 0x12, 0x28],
+  moveWindowLeft: [0x11, 0x12, 0x25],
+  moveWindowRight: [0x11, 0x12, 0x27],
+  hideApp: [0x11, 0x48],
+  toggleTypingMode: [0x11, 0x10, 0x57]
+};
+
+function sameCodes(left: number[], right: number[] | undefined): boolean {
+  if (!right || left.length !== right.length) return false;
+  return [...left].sort().join(',') === [...right].sort().join(',');
+}
+
 /** Migrate only unchanged legacy defaults; never overwrite a customized binding. */
 export function migrateControls(saved: Record<string, ShortcutBinding>, platform: string, version: number) {
   const defaults = defaultHotkeys(platform);
-  const legacy = defaultHotkeys('win32');
   const normalized = Object.fromEntries(Object.entries(saved).map(([name, binding]) => [name, {
     ...binding,
     vkCodes: binding.vkCodes.map(code => ({
@@ -79,8 +134,12 @@ export function migrateControls(saved: Record<string, ShortcutBinding>, platform
   }]));
   const result = { ...defaults, ...normalized };
   for (const [name, binding] of Object.entries(result)) {
-    if (platform === 'darwin' && version < 1 && legacy[name] &&
-        [...binding.vkCodes].sort().join(',') === [...legacy[name].vkCodes].sort().join(',')) {
+    if (platform === 'darwin' && version < 1 && sameCodes(binding.vkCodes, legacyWindowsHotkeys[name])) {
+      result[name] = defaults[name];
+    }
+    // Escape was the old global Windows stop chord, and Ctrl+Alt+Arrow rotates the display.
+    if (platform !== 'darwin' && version < 2 && sameCodes(binding.vkCodes, legacyWindowsHotkeys[name]) &&
+        (name === 'cancelStream' || name.startsWith('moveWindow'))) {
       result[name] = defaults[name];
     }
     result[name] = { ...result[name], label: shortcutLabel(result[name].vkCodes, platform) };

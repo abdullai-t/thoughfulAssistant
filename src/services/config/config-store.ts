@@ -25,7 +25,7 @@ export class ConfigStore {
     this.store.set('ocr', ConfigSchema.shape.ocr.parse(this.store.get('ocr')));
     const hotkeys = migrateControls(this.store.get('hotkeys'), process.platform, this.store.get('controlsVersion'));
     if (JSON.stringify(hotkeys) !== JSON.stringify(this.store.get('hotkeys'))) this.store.set('hotkeys', hotkeys);
-    this.store.set('controlsVersion', 1);
+    this.store.set('controlsVersion', 2);
     this.store.set('overlay', ConfigSchema.shape.overlay.parse(this.store.get('overlay')));
   }
 

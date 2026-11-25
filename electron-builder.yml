@@ -11,13 +11,17 @@ extraResources:
 files:
   - out/**/*
 win:
+  # Separate from the Mac dmg/zip names produced by scripts/package-mac.js.
+  artifactName: "${productName}-${version}-win-${arch}.${ext}"
   target:
     - target: nsis
       arch:
         - x64
   icon: assets/icons/app-icon.ico
   extraResources:
-    - from: src/native/build/Release/
+    # node-gyp writes the Electron addon to build/Release, which is also
+    # where the unpackaged app loads it from.
+    - from: build/Release/
       to: native/
       filter:
         - "*.node"

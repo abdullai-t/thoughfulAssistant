@@ -11,6 +11,7 @@ import { AutoAnswerScheduler, type AutoAnswerCandidate } from '../services/audio
 import { MacAudioCapture } from '../services/audio/mac-audio-capture';
 import { OcrManager } from '../services/ocr/ocr-manager';
 import { ConfigStore } from '../services/config/config-store';
+import { acceleratorFor } from '../shared/controls';
 
 // Disable Chromium's WGC (Windows Graphics Capture) — it conflicts with
 // SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE). Chromium falls back to
@@ -245,7 +246,12 @@ async function createApp(): Promise<void> {
     },
     onQuit: () => {
       cleanup();
-    }
+    },
+    accelerators: process.platform === 'win32' ? {
+      toggleOverlay: acceleratorFor(config.hotkeys.toggleOverlay.vkCodes, 'win32'),
+      toggleRecording: acceleratorFor(config.hotkeys.toggleRecording.vkCodes, 'win32'),
+      quit: acceleratorFor(config.hotkeys.quitApp.vkCodes, 'win32')
+    } : undefined
   });
   // Hide the Dock entry only after a working menu-bar recovery control exists.
   if (process.platform === 'darwin' && config.overlay.hideDock) app.dock?.hide();

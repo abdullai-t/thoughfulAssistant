@@ -11,12 +11,13 @@ function load(file, electron, platform = 'darwin') {
   vm.runInNewContext(code, {
     module, exports: module.exports, __dirname: __dirname, Buffer, setTimeout,
     process: { platform, resourcesPath: '/unavailable' },
+    setInterval, clearInterval,
     console: { log() {}, warn() {}, error() {} },
     require: name => name === 'electron' ? electron : require(name)
   });
   return module.exports;
 }
-const { defaultHotkeys, migrateControls, acceleratorFor, shortcutLabel } = load('src/shared/controls.ts');
+const { defaultHotkeys, migrateControls, acceleratorFor, shortcutLabel, isReservedWindowsBinding } = load('src/shared/controls.ts');
 const mac = defaultHotkeys('darwin');
 assert.equal(acceleratorFor(mac.toggleOverlay.vkCodes, 'darwin'), 'Command+\\');
 assert.equal(acceleratorFor(mac.chat.vkCodes, 'darwin'), 'Command+Enter');
@@ -32,6 +33,56 @@ assert.equal(migrated.cancelStream.label, '⌘⇧X');
 assert.deepEqual(migrateControls(migrated, 'darwin', 1), migrated);
 assert.equal(migrateControls(old, 'win32', 0).askAi.label, 'Ctrl+Shift+A');
 assert.equal(new Set(Object.values(mac).map(b => acceleratorFor(b.vkCodes, 'darwin'))).size, Object.keys(mac).length);
+const macLabels = {
+  toggleOverlay: '⌘\\', chat: '⌘↵', askAi: '⌘⇧↵', captureScreen: '⌘⇧S', toggleRecording: '⌘⇧R',
+  toggleInteract: '⌘⇧I', cancelStream: '⌘⇧X', resetAll: '⌘⇧N', scrollUp: '⌘⇧↑', scrollDown: '⌘⇧↓',
+  quitApp: '⌘⌥Q', moveWindowUp: '⌘⌥↑', moveWindowDown: '⌘⌥↓', moveWindowLeft: '⌘⌥←',
+  moveWindowRight: '⌘⌥→', hideApp: '⌘⇧H', toggleTypingMode: '⌘⇧W'
+};
+for (const [name, label] of Object.entries(macLabels)) assert.equal(mac[name].label, label, name);
+const windowsDefaults = defaultHotkeys('win32');
+const winLabels = {
+  toggleOverlay: 'Ctrl+Shift+H', chat: 'Ctrl+Enter', askAi: 'Ctrl+Shift+A', captureScreen: 'Ctrl+Shift+S',
+  toggleRecording: 'Ctrl+Shift+R', toggleInteract: 'Ctrl+Shift+I', cancelStream: 'Ctrl+Shift+X',
+  resetAll: 'Ctrl+Shift+N', scrollUp: 'Ctrl+Shift+Up', scrollDown: 'Ctrl+Shift+Down', quitApp: 'Ctrl+Shift+Q',
+  moveWindowUp: 'Ctrl+Alt+Shift+Up', moveWindowDown: 'Ctrl+Alt+Shift+Down', moveWindowLeft: 'Ctrl+Alt+Shift+Left',
+  moveWindowRight: 'Ctrl+Alt+Shift+Right', hideApp: 'Ctrl+H', toggleTypingMode: 'Ctrl+Shift+W'
+};
+for (const [name, label] of Object.entries(winLabels)) {
+  assert.equal(windowsDefaults[name].label, label, name);
+  assert.equal(windowsDefaults[name].label.includes('⌘') || windowsDefaults[name].label.includes('⌥'), false);
+  assert.equal(isReservedWindowsBinding(windowsDefaults[name].vkCodes), false, name);
+}
+assert.equal(isReservedWindowsBinding([0x1B]), true);
+assert.equal(isReservedWindowsBinding([0x11, 0x12, 0x26]), true);
+assert.equal(isReservedWindowsBinding([0x12, 0x73]), true);
+assert.equal(isReservedWindowsBinding([0x5B, 0x45]), true);
+const legacyWin = defaultHotkeys('win32');
+legacyWin.cancelStream = { vkCodes: [0x1B], label: 'Escape' };
+legacyWin.moveWindowLeft = { vkCodes: [0x11, 0x12, 0x25], label: 'Ctrl+Alt+Left' };
+legacyWin.askAi = { vkCodes: [0x11, 0x10, 0x42], label: 'custom' };
+const upgraded = migrateControls(legacyWin, 'win32', 1);
+assert.equal(upgraded.cancelStream.label, 'Ctrl+Shift+X');
+assert.equal(upgraded.moveWindowLeft.label, 'Ctrl+Alt+Shift+Left');
+assert.equal(upgraded.askAi.label, 'Ctrl+Shift+B');
+assert.equal(migrateControls(legacyWin, 'win32', 2).cancelStream.label, 'Escape');
+const legacyOnMac = migrateControls({
+  toggleOverlay: { vkCodes: [0x11, 0x10, 0x48], label: 'Ctrl+Shift+H' },
+  cancelStream: { vkCodes: [0x1B], label: 'Escape' },
+  moveWindowUp: { vkCodes: [0x11, 0x12, 0x26], label: 'Ctrl+Alt+Up' }
+}, 'darwin', 0);
+assert.equal(legacyOnMac.toggleOverlay.label, '⌘\\');
+assert.equal(legacyOnMac.cancelStream.label, '⌘⇧X');
+assert.equal(legacyOnMac.moveWindowUp.label, '⌘⌥↑');
+const { isWindowDragTarget } = load('src/shared/window-drag.ts');
+const dragNode = (token) => ({ closest: (selector) => selector.includes(token) ? { token } : null });
+assert.equal(isWindowDragTarget(dragNode('.overlay-panel')), true);
+assert.equal(isWindowDragTarget(dragNode('.settings-topbar')), true);
+assert.equal(isWindowDragTarget(dragNode('button')), false);
+assert.equal(isWindowDragTarget(dragNode('textarea')), false);
+assert.equal(isWindowDragTarget(dragNode('.tab-content')), false);
+assert.equal(isWindowDragTarget(dragNode('.audio-panel')), false);
+assert.equal(isWindowDragTarget(null), false);
 console.log('PASS: Mac mappings, legacy migration, custom bindings, idempotence, Windows defaults, no collisions');
 
 class MockWindow extends EventEmitter {
@@ -58,8 +109,14 @@ class MockWindow extends EventEmitter {
   setSize(width, height) { Object.assign(this.bounds, { width, height }); }
 }
 const display = { workArea: { x: 0, y: 25, width: 1200, height: 775 }, workAreaSize: { width: 1200, height: 775 } };
+const cursor = { x: 0, y: 0 };
 const { WindowManager } = load('src/main/window-manager.ts', {
-  BrowserWindow: MockWindow, screen: { getPrimaryDisplay: () => display, getDisplayMatching: () => display }
+  BrowserWindow: MockWindow,
+  screen: {
+    getPrimaryDisplay: () => display,
+    getDisplayMatching: () => display,
+    getCursorScreenPoint: () => ({ x: cursor.x, y: cursor.y })
+  }
 });
 const manager = new WindowManager();
 const win = manager.createOverlayWindow({ x: 100, y: 100, width: 500, height: 600, opacity: 0.85 });
@@ -82,6 +139,31 @@ manager.setFocusableForInput(false); assert.equal(win.focused, false);
 manager.moveBy(-10000, 10000); assert.equal(win.bounds.x, 0); assert.equal(win.bounds.y, 200);
 win.setContentProtection = () => { throw new Error('unsupported'); };
 manager.setContentProtection(true); assert.equal(manager.getState().contentProtection, 'unavailable');
+manager.stealthShow();
+manager.setFullPassthrough(true);
+cursor.x = 10; cursor.y = 10;
+manager.beginDrag();
+cursor.x = 80; cursor.y = 80;
+manager.dragMove();
+assert.equal(win.bounds.x, 0, 'click-through does not drag');
+assert.equal(win.bounds.y, 200);
+manager.endDrag();
+manager.setFullPassthrough(false);
+const [dragStartX, dragStartY] = win.getPosition();
+cursor.x = 400; cursor.y = 400;
+manager.beginDrag();
+assert.equal(win.ignoring, false);
+cursor.x = 430; cursor.y = 360;
+manager.dragMove();
+assert.equal(win.getPosition()[0], dragStartX + 30);
+assert.equal(win.getPosition()[1], dragStartY - 40);
+manager.handleSmartHitTest(true);
+assert.equal(win.ignoring, false, 'drag keeps mouse events');
+manager.endDrag();
+const frozenX = win.getPosition()[0];
+cursor.x = 900;
+manager.dragMove();
+assert.equal(win.getPosition()[0], frozenX);
 console.log('PASS: protection before show, opt-out persistence, no focus steal, hide/show, click-through, focus release, bounds, failure status');
 
 const registrations = new Map();
@@ -103,6 +185,36 @@ let fired; hotkeys.on('hotkey', action => { fired = action; });
 registrations.get('Command+Enter')(); assert.equal(fired, 'chat');
 hotkeys.stop(); assert.equal(registrations.size, 0);
 console.log('PASS: accelerator registration, callback dispatch, conflicts surfaced, no global Escape, cleanup');
+
+const winRegistrations = new Map();
+const { HotkeyManager: WindowsHotkeyManager } = load('src/main/hotkey-manager.ts', {
+  globalShortcut: {
+    register: (key, callback) => { winRegistrations.set(key, callback); return true; },
+    unregister: key => winRegistrations.delete(key)
+  }
+}, 'win32');
+const windowsHotkeys = new WindowsHotkeyManager();
+windowsHotkeys.registerHotkeys(defaultHotkeys('win32'));
+windowsHotkeys.start();
+assert.ok(winRegistrations.has('Control+Shift+H'));
+assert.ok(winRegistrations.has('Control+Enter'));
+assert.ok(winRegistrations.has('Control+Shift+X'));
+assert.ok(winRegistrations.has('Control+Alt+Shift+Up'));
+assert.equal(winRegistrations.has('Escape'), false);
+assert.equal(winRegistrations.has('Control+Alt+Up'), false);
+assert.equal([...winRegistrations.keys()].some(key => key.includes('Command') || key.includes('Option')), false);
+windowsHotkeys.stop();
+const reserved = defaultHotkeys('win32');
+reserved.moveWindowUp = { vkCodes: [0x11, 0x12, 0x26], label: 'Ctrl+Alt+Up' };
+reserved.cancelStream = { vkCodes: [0x1B], label: 'Escape' };
+windowsHotkeys.registerHotkeys(reserved);
+windowsHotkeys.start();
+assert.ok(windowsHotkeys.getFailedShortcuts().includes('moveWindowUp'));
+assert.ok(windowsHotkeys.getFailedShortcuts().includes('cancelStream'));
+assert.equal(winRegistrations.has('Control+Alt+Up'), false);
+assert.equal(winRegistrations.has('Escape'), false);
+windowsHotkeys.stop();
+console.log('PASS: Windows Ctrl/Alt accelerators, reserved chords refused, Escape stays local');
 
 (async () => {
   manager.stealthShow();
