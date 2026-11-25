@@ -11,6 +11,7 @@ const { version } = require('../package.json');
 const appPath = path.join(projectRoot, 'release', 'mac-arm64', 'InterviewOverlay.app');
 const zipPath = path.join(projectRoot, 'release', `InterviewOverlay-${version}-arm64-mac.zip`);
 const dmgPath = path.join(projectRoot, 'release', `InterviewOverlay-${version}-arm64.dmg`);
+const DEFAULT_SIGN_IDENTITY = 'InterviewOverlay Local Signing';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -24,6 +25,18 @@ function run(command, args, options = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function resolveSignIdentity() {
+  const requested = process.env.MAC_SIGN_IDENTITY || DEFAULT_SIGN_IDENTITY;
+  const result = spawnSync('security', ['find-identity', '-p', 'codesigning'], {
+    encoding: 'utf8'
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  if (output.includes(`"${requested}"`)) {
+    return requested;
+  }
+  return null;
+}
+
 run(process.execPath, [path.join(projectRoot, 'scripts/build-mac-audio.cjs')]);
 run(process.env.npm_execpath, ['run', 'build']);
 
@@ -35,9 +48,18 @@ run(electronBuilder, ['--mac', '--arm64', '--dir'], {
   }
 });
 
-// Ad-hoc signing gives local builds a self-consistent signature without
-// requiring or accidentally selecting a developer certificate.
-run('codesign', ['--force', '--deep', '--sign', '-', appPath]);
+const identity = resolveSignIdentity();
+if (identity) {
+  console.log(`Signing with identity "${identity}"`);
+  run('codesign', ['--force', '--deep', '--sign', identity, appPath]);
+} else {
+  const requested = process.env.MAC_SIGN_IDENTITY || DEFAULT_SIGN_IDENTITY;
+  console.warn(
+    `Signing identity "${requested}" was not found in the keychain; signing ad-hoc. ` +
+      'Run `npm run create:mac-signing-cert` so Screen Recording and microphone grants persist across rebuilds.'
+  );
+  run('codesign', ['--force', '--deep', '--sign', '-', appPath]);
+}
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
 
 run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath]);

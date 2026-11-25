@@ -20,6 +20,7 @@
     "preview": "electron-vite preview",
     "package": "electron-builder --win",
     "package:mac": "node scripts/package-mac.js",
+    "create:mac-signing-cert": "bash scripts/create-mac-signing-cert.sh",
     "rebuild": "node scripts/rebuild-native.js"
   },
   "dependencies": {

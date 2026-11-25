@@ -17,7 +17,7 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: assets/icons/app-icon.ico
+  icon: assets/win/app-icon.ico
   extraResources:
     # node-gyp writes the Electron addon to build/Release, which is also
     # where the unpackaged app loads it from.

@@ -20,13 +20,15 @@ Run this on a Mac with Apple Silicon, macOS 13 or later, and Xcode command-line 
 npm run package:mac
 ```
 
-That builds the Swift audio helper, the Electron bundle, an ad-hoc signed `.app`, then:
+That builds the Swift audio helper, the Electron bundle, a signed `.app`, then:
 
 - `release/mac-arm64/InterviewOverlay.app`
 - `release/InterviewOverlay-<version>-arm64.dmg`
 - `release/InterviewOverlay-<version>-arm64-mac.zip`
 
-`npm run package:mac` refuses to run on any other OS. These local packages are ad-hoc signed, not notarized. Developer ID signing and notarization are done separately on a Mac.
+`npm run package:mac` refuses to run on any other OS. Local packages are signed with the `InterviewOverlay Local Signing` self-signed identity when that certificate is in your login keychain, or ad-hoc otherwise. They are not notarized. Developer ID signing and notarization are done separately on a Mac.
+
+A self-signed identity keeps Screen Recording, Microphone, System Audio, and Speech Recognition grants across rebuilds (ad-hoc signatures change every build, so macOS treats each one as a new app). Create it once with `npm run create:mac-signing-cert`. Override the identity name with `MAC_SIGN_IDENTITY` if needed. The first `codesign` or install may ask you to allow keychain access or to re-grant privacy permissions once.
 
 `npm run build:mac-audio` rebuilds only the `build/mac/overlay-audio` helper. `npm run dev` starts the unpackaged app.
 
@@ -81,7 +83,7 @@ Windows shortcuts use Ctrl and Alt. They are not the macOS symbols. Bare Escape 
 
 The tray menu shows the overlay, recording, and quit accelerators. macOS bindings are unchanged; see [docs/mac-controls.md](docs/mac-controls.md).
 
-It is per-user by default (the install directory can be changed) and creates Desktop and Start menu shortcuts. The app icon is `assets/icons/app-icon.ico`.
+It is per-user by default (the install directory can be changed) and creates Desktop and Start menu shortcuts. The app icon is `assets/win/app-icon.ico`.
 
 `npm run build:win-native` rebuilds only the addon. `npm run package` is still `electron-builder --win` alone: it does not compile the bundle or the addon. Use `npm run build:win`.
 
