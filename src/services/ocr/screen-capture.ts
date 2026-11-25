@@ -1,5 +1,6 @@
 import { desktopCapturer, screen } from 'electron';
 import { ensureScreenPermission, getScreenPermissionStatus, ScreenPermissionError } from './screen-permission';
+import { visionJpeg, visionPixelSize } from '../ai/vision-image';
 
 export interface CapturedScreen {
   imageDataUrl: string;
@@ -23,15 +24,15 @@ export async function captureScreen(displayId = 'cursor', options: { allowPermis
     : screen.getAllDisplays().find(item => String(item.id) === displayId);
   if (!display) throw new Error('The selected display is disconnected. Choose a display in Settings.');
   await ensureScreenPermission(options.allowPermissionPrompt ?? true);
-  const ratio = Math.min(1, 2560 / (display.size.width * display.scaleFactor));
+  const thumbnailSize = visionPixelSize(
+    display.size.width * display.scaleFactor,
+    display.size.height * display.scaleFactor
+  );
   let sources;
   try {
     sources = await desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: {
-        width: Math.round(display.size.width * display.scaleFactor * ratio),
-        height: Math.round(display.size.height * display.scaleFactor * ratio)
-      }
+      thumbnailSize
     });
   } catch (error) {
     const status = getScreenPermissionStatus();
@@ -46,10 +47,12 @@ export async function captureScreen(displayId = 'cursor', options: { allowPermis
   }
   const thumbnail = source.thumbnail;
   const size = thumbnail.getSize();
-  const ocrImage = size.width > 1600 ? thumbnail.resize({ width: 1600 }) : thumbnail;
-  const modelImage = size.width > 1920 ? thumbnail.resize({ width: 1920 }) : thumbnail;
+  const ocrLongEdge = Math.max(size.width, size.height);
+  const ocrImage = ocrLongEdge > 1600
+    ? thumbnail.resize(visionPixelSize(size.width, size.height, 1600))
+    : thumbnail;
   return {
-    imageDataUrl: 'data:image/jpeg;base64,' + modelImage.toJPEG(85).toString('base64'),
+    imageDataUrl: 'data:image/jpeg;base64,' + visionJpeg(thumbnail).toString('base64'),
     ocrDataUrl: 'data:image/png;base64,' + ocrImage.toPNG().toString('base64'),
     width: size.width, height: size.height, timestamp: Date.now(), displayId: String(display.id)
   };

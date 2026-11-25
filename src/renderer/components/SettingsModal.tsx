@@ -6,6 +6,7 @@ import { GROQ_MODELS, groqSupportsImages } from '../../shared/groq';
 import { getSystemPrompt, type SystemPromptMode } from '../../services/ai/prompt-templates';
 
 const ANTHROPIC_MODELS = [
+  'claude-fable-5-2',
   'claude-sonnet-5-5',
   'claude-haiku-5-5',
   'claude-opus-5-5',

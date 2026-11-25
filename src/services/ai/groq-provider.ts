@@ -1,19 +1,26 @@
 import OpenAI from 'openai';
 import type { AiProvider, AiMessage, AiStreamEvent } from './ai-provider';
 import { DEFAULT_GROQ_MODEL, groqSupportsImages } from '../../shared/groq';
+import { prepareProviderMessages } from './chat-payload';
+import { providerErrorDetail } from './provider-error';
+import { limitVisionDataUrl } from './vision-image';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 
 function describeError(error: unknown): string {
-  // Do not surface raw SDK errors: they can include upstream request data.
+  // Use Groq's type and message. Do not forward the SDK message: it can contain the request.
   const details = error as { status?: number; name?: string } | null;
+  const reason = providerErrorDetail(error);
   switch (details?.status) {
     case 401: return 'Groq rejected the API key. Check the Groq answer API key in Settings.';
     case 403: return 'Groq access denied. Check your project permissions and model access.';
     case 404: return 'Groq model not found or unavailable to your account. Choose another model in Settings.';
     case 413: return 'Groq request is too large. Clear context or capture fewer screens.';
     case 429: return 'Groq rate or quota limit reached. Wait before retrying and check your Groq usage limits.';
-    case 400: case 422: return 'Groq rejected this request. Check the model ID, model access, and context size in Settings.';
+    case 400: case 422:
+      return reason
+        ? `Groq rejected this request (${reason}). Check the model ID, model access, and context size in Settings.`
+        : 'Groq rejected this request. Check the model ID, model access, and context size in Settings.';
   }
   if (details?.status && details.status >= 500) return 'Groq is temporarily unavailable. Try again shortly.';
   if (details?.name === 'APIConnectionTimeoutError') return 'Groq timed out. Check your connection and try again.';
@@ -49,14 +56,18 @@ export class GroqProvider implements AiProvider {
       // Groq-only options differ between GPT-OSS and other reasoning models.
       const reasoningOptions = gptOss ? { include_reasoning: false, reasoning_effort: 'low' as const }
         : groqSupportsImages(this.model) ? { reasoning_format: 'hidden', reasoning_effort: 'low' as const } : {};
+      const prepared = prepareProviderMessages(messages);
       const stream = await this.client.chat.completions.create({
         model: this.model,
-        messages: messages.map(message => message.role === 'user' && message.images?.length
-          ? { role: 'user' as const, content: [
-            { type: 'text' as const, text: message.content },
-            ...message.images.map(url => ({ type: 'image_url' as const, image_url: { url } }))
-          ] }
-          : { role: message.role, content: message.content }),
+        messages: [
+          ...(prepared.system ? [{ role: 'system' as const, content: prepared.system }] : []),
+          ...prepared.turns.map(turn => turn.role === 'user' && turn.images?.length
+            ? { role: 'user' as const, content: [
+              { type: 'text' as const, text: turn.content },
+              ...turn.images.map(url => ({ type: 'image_url' as const, image_url: { url: limitVisionDataUrl(url).dataUrl } }))
+            ] }
+            : { role: turn.role, content: turn.content })
+        ],
         stream: true,
         temperature: 0.7,
         max_completion_tokens: 4096,
