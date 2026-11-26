@@ -107,6 +107,8 @@ class MockWindow extends EventEmitter {
   getPosition() { return [this.bounds.x, this.bounds.y]; }
   setPosition(x, y) { Object.assign(this.bounds, { x, y }); }
   setSize(width, height) { Object.assign(this.bounds, { width, height }); }
+  setSkipTaskbar(value) { this.skipTaskbar = value; this.skipTaskbarCalls = (this.skipTaskbarCalls || 0) + 1; }
+  getNativeWindowHandle() { return Buffer.alloc(8); }
 }
 const display = { workArea: { x: 0, y: 25, width: 1200, height: 775 }, workAreaSize: { width: 1200, height: 775 } };
 const cursor = { x: 0, y: 0 };
@@ -121,6 +123,9 @@ const { WindowManager } = load('src/main/window-manager.ts', {
 const manager = new WindowManager();
 const win = manager.createOverlayWindow({ x: 100, y: 100, width: 500, height: 600, opacity: 0.85 });
 assert.equal(win.options.show, false);
+assert.equal(win.options.type, undefined);
+assert.equal(win.options.skipTaskbar, true);
+assert.equal(win.skipTaskbarCalls || 0, 0, 'macOS must not reapply Windows taskbar hiding');
 assert.equal(win.protected, true);
 assert.equal(manager.getState().contentProtection, 'requested');
 assert.match(manager.getState().protectionNote, /ScreenCaptureKit/);
@@ -165,6 +170,32 @@ cursor.x = 900;
 manager.dragMove();
 assert.equal(win.getPosition()[0], frozenX);
 console.log('PASS: protection before show, opt-out persistence, no focus steal, hide/show, click-through, focus release, bounds, failure status');
+
+const { WindowManager: WindowsWindowManager } = load('src/main/window-manager.ts', {
+  BrowserWindow: MockWindow,
+  screen: {
+    getPrimaryDisplay: () => display,
+    getDisplayMatching: () => display,
+    getCursorScreenPoint: () => ({ x: 0, y: 0 })
+  }
+}, 'win32');
+const windowsManager = new WindowsWindowManager();
+const windowsWin = windowsManager.createOverlayWindow({ x: 10, y: 10, width: 400, height: 300, opacity: 1, captureProtection: true });
+assert.equal(windowsWin.options.type, 'toolbar');
+assert.equal(windowsWin.options.skipTaskbar, true);
+assert.equal(windowsWin.protected, true);
+assert.ok(windowsWin.skipTaskbarCalls > 0);
+const beforeShow = windowsWin.skipTaskbarCalls;
+windowsWin.emit('ready-to-show');
+assert.equal(windowsWin.visible, true);
+assert.ok(windowsWin.skipTaskbarCalls > beforeShow, 'show must reapply skipTaskbar');
+windowsManager.setContentProtection(false);
+assert.equal(windowsWin.skipTaskbar, false);
+windowsManager.setContentProtection(true);
+assert.equal(windowsWin.skipTaskbar, true);
+windowsWin.emit('focus');
+assert.equal(windowsWin.skipTaskbar, true);
+console.log('PASS: Windows stealth keeps the overlay off the taskbar after show and focus');
 
 const registrations = new Map();
 const shortcuts = {
