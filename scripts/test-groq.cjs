@@ -62,7 +62,13 @@ async function providerTests() {
   const image = 'data:image/jpeg;base64,c3ludGhldGlj';
   await provider.streamChat([...messages, { role: 'user', content: 'Screen question', images: [image] }], collect);
   const body = requests.at(-1).body;
-  assert.deepEqual(json(body.messages.at(-1).content), [{ type: 'text', text: 'Screen question' }, { type: 'image_url', image_url: { url: image } }]);
+  assert.deepEqual(json(body.messages), [
+    { role: 'system', content: 'Be helpful' },
+    { role: 'user', content: [
+      { type: 'text', text: 'Synthetic question\n\nScreen question' },
+      { type: 'image_url', image_url: { url: image } }
+    ] }
+  ]);
   assert.equal(body.reasoning_format, 'hidden'); assert.equal(body.include_reasoning, undefined);
   provider.setModel('unknown-custom-model');
   assert.equal(await provider.supportsImages(), false);
@@ -85,6 +91,10 @@ async function providerTests() {
   await provider.streamChat(messages, collect); assert.match(events.at(-1).content, /timed out/);
   failWith = new Error('network unavailable');
   await provider.streamChat(messages, collect); assert.match(events.at(-1).content, /internet connection/);
+  failWith = { status: 400, message: 'DO NOT LEAK synthetic-secret', error: { type: 'invalid_request_error', message: 'image too large' } };
+  events.length = 0; await provider.streamChat(messages, collect);
+  assert.match(events[0].content, /invalid_request_error: image too large/);
+  assert.doesNotMatch(events[0].content, /DO NOT LEAK|synthetic-secret/);
   failWith = null; empty = true;
   await provider.streamChat(messages, collect); assert.match(events.at(-1).content, /complete text answer/);
   empty = false; finishReason = 'length';

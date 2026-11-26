@@ -45,6 +45,9 @@ export class WindowManager extends EventEmitter {
       transparent: true,
       frame: false,
       alwaysOnTop: true,
+      // Windows: toolbar + skipTaskbar is the tool-window style (no taskbar, no Alt+Tab).
+      // macOS keeps the default window type; the Dock is hidden separately.
+      ...(process.platform === 'win32' ? { type: 'toolbar' as const } : {}),
       skipTaskbar: true,
       resizable: true,
       hasShadow: false,
@@ -73,16 +76,21 @@ export class WindowManager extends EventEmitter {
     // dynamically based on whether mouse is over a UI element or transparent area
     this.setFullPassthrough(config.clickThrough ?? false);
     this.setPosition(config.x, config.y);
-    this.mainWindow.on('show', () => this.emitState());
+    this.mainWindow.on('show', () => {
+      this.keepOffTaskbar();
+      this.emitState();
+    });
     this.mainWindow.on('hide', () => {
       this.setFocusableForInput(false);
       this.emitState();
     });
+    this.mainWindow.on('focus', () => this.keepOffTaskbar());
     this.mainWindow.once('ready-to-show', () => this.stealthShow());
 
-    // Reapply the user's requested protection state on restore.
+    // Windows puts the taskbar button back after restore. Re-apply stealth.
     this.mainWindow.on('restore', () => {
       this.reapplyDisplayAffinity();
+      this.keepOffTaskbar();
     });
 
     this.mainWindow.on('closed', () => {
@@ -107,6 +115,7 @@ export class WindowManager extends EventEmitter {
         if (enabled) nativeAddon.applyStealthMode(hwnd);
         else nativeAddon.removeStealthMode(hwnd);
       }
+      if (process.platform === 'win32') this.mainWindow.setSkipTaskbar?.(enabled);
       // Electron 33 has the setter but no getter. Successful submission still
       // only means "requested", never verified exclusion by a capture app.
       const getter = (this.mainWindow as BrowserWindow & { isContentProtected?: () => boolean }).isContentProtected;
@@ -180,7 +189,32 @@ export class WindowManager extends EventEmitter {
       if (this.isFullPassthrough) this.setFullPassthrough(false);
       this.mainWindow.focus();
     } else if (this.mainWindow.isFocused()) this.mainWindow.blur();
+    // Focusing a window makes Windows add a taskbar button again.
+    this.keepOffTaskbar();
     console.log(`[window] Focusable for input: ${enable}`);
+  }
+
+  /**
+   * Windows recreates the taskbar button on show, restore, and focus.
+   * Settings lives in this same window, so one re-apply covers it.
+   * macOS Dock visibility stays on app.dock.hide and is not touched here.
+   */
+  private keepOffTaskbar(): void {
+    if (process.platform !== 'win32' || !this.protectionRequested) return;
+    const wins = typeof BrowserWindow.getAllWindows === 'function'
+      ? BrowserWindow.getAllWindows()
+      : (this.mainWindow ? [this.mainWindow] : []);
+    const apply = () => {
+      for (const win of wins) {
+        if (!win || win.isDestroyed()) continue;
+        win.setSkipTaskbar?.(true);
+        if (!nativeAddon?.applyToolWindowStyle) continue;
+        try { nativeAddon.applyToolWindowStyle(win.getNativeWindowHandle()); } catch { /* addon is optional */ }
+      }
+    };
+    apply();
+    setTimeout(apply, 0);
+    setTimeout(apply, 50);
   }
 
   /**
@@ -192,7 +226,10 @@ export class WindowManager extends EventEmitter {
     this.visibilityRevision++;
 
     this.reapplyDisplayAffinity();
+    this.keepOffTaskbar();
+    // hide(), not minimize(): minimize puts a window on the taskbar.
     this.mainWindow.showInactive();
+    this.keepOffTaskbar();
   }
 
   toggleVisibility(): void {

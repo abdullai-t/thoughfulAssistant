@@ -19,7 +19,9 @@ let access = 'denied', nextAccess, pending, rejectSources = false, revoking = fa
 const calls = [];
 let encoded = 0;
 const display = { id: 22, size: { width: 1000, height: 800 }, scaleFactor: 1 };
+const resizes = [];
 const thumbnail = { isEmpty: () => false, getSize: () => display.size,
+  resize(size) { resizes.push(size); return this; },
   toJPEG: () => { encoded++; return Buffer.from('jpeg'); }, toPNG: () => Buffer.from('png') };
 const electron = {
   systemPreferences: { getMediaAccessStatus: () => access },
@@ -71,6 +73,14 @@ async function captureTests() {
   access = 'denied'; nextAccess = 'granted'; calls.length = 0;
   await captureScreen();
   assert.equal(calls.length, 2); assert.equal(calls[0].thumbnailSize.width, 0); assert.equal(calls[1].thumbnailSize.width, 1000);
+  display.size = { width: 3840, height: 2160 }; display.scaleFactor = 2;
+  calls.length = 0; resizes.length = 0;
+  await captureScreen();
+  assert.equal(calls.at(-1).thumbnailSize.width, 1568);
+  assert.equal(calls.at(-1).thumbnailSize.height, 882);
+  assert.equal(resizes[0].width, 1600); assert.equal(resizes[0].height, 900);
+  assert.equal(resizes[1].width, 1568); assert.equal(resizes[1].height, 882);
+  display.size = { width: 1000, height: 800 }; display.scaleFactor = 1;
   access = 'denied'; calls.length = 0; const before = encoded;
   await assert.rejects(captureScreen(), /not approved/);
   assert.equal(calls.length, 1); assert.equal(calls[0].thumbnailSize.width, 0); assert.equal(encoded, before);

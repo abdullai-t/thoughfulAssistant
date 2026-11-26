@@ -209,6 +209,19 @@ async function aiTests() {
   assert.equal(messages[0].at(-1).images.length, 1);
   assert.ok(messages[2].every(message => !message.images), 'Old screenshots must not be resent from history');
   console.log('PASS: Ollama vision capabilities/base64, offline OCR fallback, cancelled-stream isolation, no image retention in history');
+
+  let openAiError = null;
+  class FakeOpenAI {
+    constructor() { this.chat = { completions: { create: async () => { if (openAiError) throw openAiError; return (async function* () { yield { choices: [{ delta: { content: 'ok' } }] }; })(); } } }; }
+  }
+  const { OpenAiProvider } = load('src/services/ai/openai-provider.ts', { openai: FakeOpenAI });
+  const openai = new OpenAiProvider('synthetic-secret');
+  const openAiEvents = [];
+  openAiError = { status: 400, message: 'DO NOT LEAK synthetic-secret', error: { type: 'invalid_request_error', message: 'content must be non-empty' } };
+  await openai.streamChat([{ role: 'user', content: 'Hello' }], event => openAiEvents.push(event));
+  assert.match(openAiEvents.at(-1).content, /invalid_request_error: content must be non-empty/);
+  assert.doesNotMatch(openAiEvents.at(-1).content, /DO NOT LEAK|synthetic-secret/);
+  console.log('PASS: OpenAI 400 surfaces the provider reason without the request');
 }
 
 (async () => { await autoAnswerTests(); await audioTests(); await helperTests(); await screenTests(); await aiTests(); })()

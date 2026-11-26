@@ -1,15 +1,21 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Agent as HttpsAgent } from 'node:https';
 import { AiProvider, AiMessage, AiStreamEvent } from './ai-provider';
+import { prepareProviderMessages } from './chat-payload';
+import { providerErrorDetail } from './provider-error';
+import { limitVisionDataUrl } from './vision-image';
 
 const ANTHROPIC_TIMEOUT_MS = 120_000;
 
 function describeError(error: unknown, model: string): string {
-  // Do not surface raw SDK errors: upstream errors can contain request data.
+  // Use Anthropic's type and message. Do not forward the SDK's own message: it can contain the request.
   const details = error as { status?: number; name?: string; cause?: { code?: string } } | null;
+  const reason = providerErrorDetail(error);
   switch (details?.status) {
     case 400: case 422:
-      return 'Anthropic rejected this request. Check the Claude model ID, model access, and context size in Settings.';
+      return reason
+        ? `Anthropic rejected this request (${reason}). Check the Claude model ID, model access, and context size in Settings.`
+        : 'Anthropic rejected this request. Check the Claude model ID, model access, and context size in Settings.';
     case 401:
       return 'Anthropic rejected the API key. Check the Anthropic API key in Settings.';
     case 402:
@@ -66,23 +72,37 @@ export class AnthropicProvider implements AiProvider {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // Separate system message from conversation
-    const systemMsg = messages.find(m => m.role === 'system');
-    const chatMessages = messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.images?.length
-        ? [{ type: 'text' as const, text: m.content }, ...m.images.map(image => ({
-          type: 'image' as const, source: { type: 'base64' as const,
-            media_type: (image.startsWith('data:image/png') ? 'image/png' : 'image/jpeg') as 'image/png' | 'image/jpeg',
-            data: image.slice(image.indexOf(',') + 1) }
-        }))] : m.content }));
+    const prepared = prepareProviderMessages(messages);
+    // Claude 5, including claude-opus-5-5, turns adaptive thinking on at the server.
+    // @anthropic-ai/sdk@0.39.0 posts this body unchanged. Do not add temperature,
+    // top_p, or a legacy thinking block (budget_tokens or type "disabled"): those
+    // are rejected with HTTP 400. An empty system string is also rejected.
+    const chatMessages = prepared.turns.map(turn => ({
+      role: turn.role,
+      content: turn.images?.length
+        ? [
+          { type: 'text' as const, text: turn.content },
+          ...turn.images.map(image => {
+            const encoded = limitVisionDataUrl(image);
+            return {
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: encoded.mediaType,
+                data: encoded.data
+              }
+            };
+          })
+        ]
+        : turn.content
+    }));
 
     try {
       const stream = this.client.messages.stream(
         {
           model: this.model,
           max_tokens: 2048,
-          system: systemMsg?.content || '',
+          ...(prepared.system ? { system: prepared.system } : {}),
           messages: chatMessages
         },
         { signal: controller.signal }

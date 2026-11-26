@@ -111,10 +111,27 @@ async function providerTests() {
   assert.equal(provider.getModel(), 'claude-sonnet-5-5');
   const image = 'data:image/png;base64,c3ludGhldGlj';
   await provider.streamChat([...messages, { role: 'user', content: 'Screen question', images: [image] }], collect);
-  assert.deepEqual(json(requests.at(-1).body.messages.at(-1).content), [
-    { type: 'text', text: 'Screen question' },
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'c3ludGhldGlj' } }
-  ]);
+  assert.deepEqual(json(requests.at(-1).body.messages), [{
+    role: 'user',
+    content: [
+      { type: 'text', text: 'Synthetic question\n\nScreen question' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'c3ludGhldGlj' } }
+    ]
+  }]);
+  assert.equal(requests.at(-1).body.temperature, undefined);
+  assert.equal(requests.at(-1).body.top_p, undefined);
+  assert.equal(requests.at(-1).body.thinking, undefined);
+  assert.equal(requests.at(-1).body.max_tokens, 2048);
+
+  await provider.streamChat([{ role: 'system', content: '   ' }, { role: 'user', content: '  ', images: [image] }], collect);
+  assert.equal(requests.at(-1).body.system, undefined);
+  assert.equal(requests.at(-1).body.messages[0].content[0].text, 'See the attached screen image.');
+  await provider.streamChat([
+    { role: 'assistant', content: 'Earlier answer' },
+    { role: 'user', content: 'Part one' },
+    { role: 'user', content: 'Part two' }
+  ], collect);
+  assert.deepEqual(json(requests.at(-1).body.messages), [{ role: 'user', content: 'Part one\n\nPart two' }]);
   console.log('PASS: trimmed key/model, macOS IPv4 agent, streamed text, system separation, and image payload');
 
   for (const [status, expected] of [
@@ -145,6 +162,23 @@ async function providerTests() {
   await provider.streamChat(messages, collect);
   assert.match(events.at(-1).content, /Could not connect/);
   assert.doesNotMatch(events.at(-1).content, /DO NOT LEAK/);
+  failWith = {
+    status: 400,
+    message: 'DO NOT LEAK synthetic-secret or the prompt text',
+    error: { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }
+  };
+  events.length = 0;
+  await provider.streamChat(messages, collect);
+  assert.match(events[0].content, /invalid_request_error: Your credit balance is too low/);
+  assert.doesNotMatch(events[0].content, /DO NOT LEAK|synthetic-secret|prompt text/);
+  failWith = {
+    status: 400,
+    error: { error: { type: 'invalid_request_error', message: 'bad key sk-ant-secretvalue1234 in request' } }
+  };
+  events.length = 0;
+  await provider.streamChat(messages, collect);
+  assert.match(events[0].content, /\[redacted\]/);
+  assert.doesNotMatch(events[0].content, /sk-ant-secretvalue1234/);
   failWith = null;
   empty = true;
   events.length = 0;
@@ -203,6 +237,13 @@ function platformAndConfigTests() {
   assert.throws(() => ConfigSchema.parse({
     ai: { anthropicModel: ' ' }, audio: {}, ocr: {}, overlay: {}, resume: '', jobDescription: ''
   }), /Choose an Anthropic model/);
+  const { visionPixelSize } = load('src/services/ai/vision-image.ts', mocks, 'win32');
+  const wide = visionPixelSize(3840, 2160);
+  assert.equal(wide.width, 1568); assert.equal(wide.height, 882);
+  const small = visionPixelSize(1000, 800);
+  assert.equal(small.width, 1000); assert.equal(small.height, 800);
+  const tall = visionPixelSize(1200, 4000);
+  assert.equal(tall.width, 470); assert.equal(tall.height, 1568);
   console.log('PASS: IPv4 override is macOS-only and Anthropic config is trimmed and validated');
 }
 
